@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e  # Para a execução em caso de erro
+set -e  # Interrompe a execução em caso de erro
 
 echo "🚀 Atualizando pacotes e instalando dependências..."
 sudo apt update && sudo apt install -y wget curl nano python3 python3-pip unzip
@@ -8,6 +8,7 @@ sudo apt update && sudo apt install -y wget curl nano python3 python3-pip unzip
 echo "📂 Criando diretórios necessários..."
 sudo mkdir -p /home/minio-data/uploads
 sudo mkdir -p /home/minio-api
+sudo mkdir -p /etc/minio
 
 echo "📥 Baixando e instalando MinIO..."
 wget https://dl.min.io/server/minio/release/linux-amd64/minio -O /usr/local/bin/minio
@@ -17,19 +18,23 @@ echo "👤 Criando usuário do MinIO..."
 sudo useradd -r minio-user -s /sbin/nologin || echo "Usuário já existe, ignorando."
 sudo chown minio-user:minio-user /usr/local/bin/minio
 
-echo "⚙️ Configurando permissões do diretório MinIO..."
+echo "⚙️ Configurando permissões dos diretórios..."
 sudo chown -R minio-user:minio-user /home/minio-data
 sudo chmod -R 775 /home/minio-data
+sudo chmod -R 775 /home/minio-api
+sudo chmod -R 775 /etc/minio
 
 echo "📝 Criando configuração do MinIO..."
-echo 'MINIO_VOLUMES="/home/minio-data"
+cat <<EOF | sudo tee /etc/minio/minio.conf
+MINIO_VOLUMES="/home/minio-data/uploads"
 MINIO_ROOT_USER="admin"
 MINIO_ROOT_PASSWORD="strongpassword"
 MINIO_ADDRESS=":9500"
-MINIO_CONSOLE_ADDRESS=":9501"' | sudo tee /etc/minio/minio.conf
+MINIO_CONSOLE_ADDRESS=":9501"
+EOF
 
 echo "🔧 Criando serviço Systemd para MinIO..."
-sudo tee /etc/systemd/system/minio.service <<EOF
+cat <<EOF | sudo tee /etc/systemd/system/minio.service
 [Unit]
 Description=MinIO Object Storage
 After=network-online.target
@@ -52,54 +57,116 @@ sudo systemctl daemon-reload
 sudo systemctl enable minio
 sudo systemctl restart minio
 
+echo "⏳ Aguardando o MinIO iniciar..."
+sleep 15  # Garante que o MinIO tenha tempo para subir completamente
+
 echo "📥 Baixando e configurando o cliente MinIO (mc)..."
 wget https://dl.min.io/client/mc/release/linux-amd64/mc -O /usr/local/bin/mc
 chmod +x /usr/local/bin/mc
 
 echo "🔗 Configurando cliente MinIO..."
-mc alias set localminio http://127.0.0.1:9000 admin strongpassword
+mc alias set localminio http://127.0.0.1:9500 admin strongpassword || {
+    echo "Erro ao configurar o alias do MinIO. Tentando novamente em 10s..."
+    sleep 10
+    mc alias set localminio http://127.0.0.1:9500 admin strongpassword
+}
 
 echo "🪣 Criando bucket 'uploads'..."
-mc mb localminio/uploads
+mc mb localminio/uploads || echo "Bucket 'uploads' já existe."
 
 echo "🌍 Definindo permissão pública para os arquivos..."
 mc anonymous set public localminio/uploads
+mc policy set public localminio/uploads
 
 echo "🐍 Instalando dependências do Python para API..."
 pip3 install fastapi uvicorn boto3 python-multipart --break-system-packages
 
 echo "📜 Criando API Python para salvar arquivos diretamente no bucket..."
-cat << 'EOF' | sudo tee /home/minio-api/main.py
-from fastapi import FastAPI, File, UploadFile
+cat <<EOF | sudo tee /home/minio-api/main.py
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, BackgroundTasks
 import os
 from datetime import datetime
+import boto3
+import logging
+
+# Configuração do logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 app = FastAPI()
 
-# Caminho do bucket no servidor
+# Configuração do MinIO
+MINIO_URL = "http://127.0.0.1:9000"
+MINIO_ACCESS_KEY = "admin"
+MINIO_SECRET_KEY = "strongpassword"
+BUCKET_NAME = "uploads"
 UPLOAD_DIR = "/home/minio-data/uploads"
 
 # Criar diretório se não existir
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
+# Inicializar cliente MinIO
+try:
+    minio_client = boto3.client(
+        "s3",
+        endpoint_url=MINIO_URL,
+        aws_access_key_id=MINIO_ACCESS_KEY,
+        aws_secret_access_key=MINIO_SECRET_KEY
+    )
+    logging.info("✅ Conectado ao MinIO com sucesso.")
+except Exception as e:
+    logging.error(f"❌ Erro ao conectar no MinIO: {e}")
+
+# Função para processar uploads em segundo plano (fila de processamento)
+def process_upload(file_data, file_key: str):
+    try:
+        minio_client.upload_fileobj(file_data, BUCKET_NAME, file_key)
+        logging.info(f"✅ Arquivo enviado para MinIO: {file_key}")
+    except Exception as e:
+        logging.error(f"❌ Erro ao enviar o arquivo para o MinIO: {e}")
+
 @app.post("/upload/")
-async def upload_file(file: UploadFile = File(...)):
-    # Criar nome único para o arquivo
-    file_key = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
-    file_path = os.path.join(UPLOAD_DIR, file_key)
-
-    # Salvar o arquivo no diretório
-    with open(file_path, "wb") as buffer:
-        buffer.write(await file.read())
-
-    # Retornar URL de acesso
-    file_url = f"http://{os.getenv('SERVER_IP', '192.7.0.34')}:9000/uploads/{file_key}"
+async def upload_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+    """Faz upload do arquivo e retorna a URL pública por padrão"""
     
-    return {"filename": file.filename, "url": file_url}
+    try:
+        file_key = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{file.filename}"
+
+        # Adicionar à fila para envio ao MinIO
+        background_tasks.add_task(process_upload, file.file, file_key)
+
+        # Retornar URL pública
+        file_url = f"{MINIO_URL}/{BUCKET_NAME}/{file_key}"
+        return {"filename": file.filename, "url": file_url}
+
+    except Exception as e:
+        logging.error(f"❌ Erro ao salvar o arquivo: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar o arquivo: {str(e)}")
+
+@app.get("/get-url/{file_name}")
+async def get_image_url(file_name: str, temporary: bool = Query(False), expires_in: int = Query(3600)):
+    """Gera uma URL para acessar a imagem (padrão: permanente). Se `temporary=True`, gera uma URL temporária."""
+    
+    try:
+        if temporary:
+            url = minio_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": BUCKET_NAME, "Key": file_name},
+                ExpiresIn=expires_in
+            )
+            logging.info(f"🔗 URL temporária gerada para {file_name}, expira em {expires_in} segundos.")
+        else:
+            url = f"{MINIO_URL}/{BUCKET_NAME}/{file_name}"
+            logging.info(f"🔗 URL permanente gerada para {file_name}")
+
+        return {"url": url}
+    
+    except Exception as e:
+        logging.error(f"❌ Erro ao gerar URL: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar URL: {str(e)}")
 EOF
 
 echo "🔧 Criando serviço Systemd para API FastAPI..."
-sudo tee /etc/systemd/system/minio-api.service <<EOF
+cat <<EOF | sudo tee /etc/systemd/system/minio-api.service
 [Unit]
 Description=FastAPI MinIO Upload API
 After=network.target
@@ -107,7 +174,6 @@ After=network.target
 [Service]
 User=$USER
 WorkingDirectory=/home/minio-api
-#ExecStart=/usr/local/bin/uvicorn main:app --host 0.0.0.0 --port 8000
 ExecStart=/usr/bin/python3 -m uvicorn main:app --host 0.0.0.0 --port 8000
 Restart=always
 
@@ -115,15 +181,13 @@ Restart=always
 WantedBy=multi-user.target
 EOF
 
-echo "⚙️ Corrigindo permissões da API..."
+echo "♻️ Corrigindo permissões da API..."
 sudo chown -R $USER:$USER /home/minio-api
 sudo chmod -R 755 /home/minio-api
 
-echo "♻️ Recarregando e iniciando o serviço da API..."
+echo "♻️ Recarregando e iniciando a API..."
 sudo systemctl daemon-reload
 sudo systemctl enable minio-api
 sudo systemctl restart minio-api
 
 echo "✅ Instalação concluída!"
-echo "📂 Uploads podem ser feitos via API em: http://$(hostname -I | awk '{print $1}'):8000/upload/"
-echo "🌍 Arquivos enviados podem ser acessados em: http://$(hostname -I | awk '{print $1}'):9000/uploads/"
