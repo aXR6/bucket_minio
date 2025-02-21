@@ -2,7 +2,7 @@
 
 services:
   minio:
-    image: minio/minio
+    build: ./minio  # Agora o MinIO será construído com OpenSSL
     container_name: minio
     restart: always
     ports:
@@ -13,9 +13,7 @@ services:
       - MINIO_ROOT_PASSWORD=strongpassword
     volumes:
       - ./minio/data:/data
-      - ./minio/certs:/etc/nginx/certs  # Certificados são armazenados aqui
-      - ./minio/certs/generate_cert.sh:/etc/nginx/certs/generate_cert.sh  # <- Garantindo que o script está disponível
-    entrypoint: ["/bin/sh", "-c", "sh /etc/nginx/certs/generate_cert.sh && exec minio server --console-address ':9090' /data"]
+      - ./minio/certs:/etc/nginx/certs
 
   fastapi:
     build: ./api

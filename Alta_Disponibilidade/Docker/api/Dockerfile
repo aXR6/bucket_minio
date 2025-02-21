@@ -1,12 +1,15 @@
-FROM python:3.9-slim
+# Usa a imagem oficial do MinIO
+FROM minio/minio
 
-WORKDIR /app
+# Instala o OpenSSL dentro do container
+RUN apk add --no-cache openssl
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copia os arquivos de configuração e scripts necessários
+COPY certs/generate_cert.sh /etc/nginx/certs/generate_cert.sh
+COPY entrypoint.sh /entrypoint.sh
 
-COPY main.py .
+# Garante permissões de execução
+RUN chmod +x /etc/nginx/certs/generate_cert.sh /entrypoint.sh
 
-EXPOSE 8000
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4"]
+# Define o entrypoint para rodar o script antes de iniciar o MinIO
+ENTRYPOINT ["/bin/sh", "-c", "sh /etc/nginx/certs/generate_cert.sh && exec minio server --console-address ':9090' /data"]
