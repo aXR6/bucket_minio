@@ -13,9 +13,9 @@ services:
       - MINIO_ROOT_PASSWORD=strongpassword
     volumes:
       - ./minio/data:/data
-      - ./minio/certs:/root/.minio/certs
-      - ./minio/entrypoint.sh:/entrypoint.sh
-    entrypoint: ["/bin/sh", "-c", "/entrypoint.sh"]
+      - ./minio/certs:/etc/nginx/certs  # Certificados são armazenados aqui
+      - ./minio/certs/generate_cert.sh:/etc/nginx/certs/generate_cert.sh  # <- Garantindo que o script está disponível
+    entrypoint: ["/bin/sh", "-c", "sh /etc/nginx/certs/generate_cert.sh && exec minio server --console-address ':9090' /data"]
 
   fastapi:
     build: ./api
