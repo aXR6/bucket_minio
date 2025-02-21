@@ -30,6 +30,14 @@ def process_upload(file_bytes, bucket, file_key, minio_config):
             aws_access_key_id=minio_config['MINIO_ACCESS_KEY'],
             aws_secret_access_key=minio_config['MINIO_SECRET_KEY']
         )
+        
+        # Verifica se a bucket existe; se não existir, cria-a.
+        try:
+            s3_client.head_bucket(Bucket=bucket)
+        except s3_client.exceptions.NoSuchBucket:
+            s3_client.create_bucket(Bucket=bucket)
+            logging.info(f"Bucket '{bucket}' criado automaticamente.")
+
         file_obj = BytesIO(file_bytes)
         s3_client.upload_fileobj(file_obj, bucket, file_key)
         return f"{minio_config['MINIO_URL']}/{bucket}/{file_key}"
@@ -57,7 +65,7 @@ async def upload_file(file: UploadFile = File(...)):
     except Exception as e:
         logging.error(f"Erro ao enfileirar upload: {e}")
         raise HTTPException(status_code=500, detail=f"Erro: {str(e)}")
-
+    
 @app.get("/get-url/{file_name}")
 async def get_image_url(file_name: str, temporary: bool = Query(False), expires_in: int = Query(3600)):
     try:
