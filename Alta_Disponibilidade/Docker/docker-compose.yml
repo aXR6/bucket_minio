@@ -2,7 +2,7 @@
 
 services:
   minio:
-    build: ./minio  # Agora o MinIO será construído com OpenSSL
+    build: ./minio
     container_name: minio
     restart: always
     ports:
