@@ -72,9 +72,11 @@ services:
     restart: always
     ports:
       - "3000:3000"
-    user: "472"  # Garantir que o usuário interno tenha permissão
+    user: "472"
     volumes:
       - ./grafana/data:/var/lib/grafana
     environment:
       - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=strongpassword
+      - GF_SECURITY_ADMIN_PASSWORD=novasenhaforte
+      - GF_AUTH_DISABLE_LOGIN_FORM=false
+      - GF_AUTH_DISABLE_SIGNOUT_MENU=false
