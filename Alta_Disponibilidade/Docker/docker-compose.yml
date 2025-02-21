@@ -1,0 +1,58 @@
+---
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    volumes:
+      - minio_data:/data
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: strongpassword
+    ports:
+      - "9500:9000"   # Mapeia a porta padrão do MinIO (9000) para 9500 na máquina host
+      - "9501:9001"   # Porta para o console
+    command: server /data --console-address ":9001"
+    restart: always
+
+  api:
+    build: ./api
+    container_name: minio-api
+    environment:
+      MINIO_URL: http://minio:9000
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: strongpassword
+      BUCKET_NAME: uploads
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - minio
+      - redis
+    ports:
+      - "8000:8000"
+    restart: always
+
+  worker:
+    build: ./api
+    container_name: celery_worker
+    environment:
+      MINIO_URL: http://minio:9000
+      MINIO_ACCESS_KEY: admin
+      MINIO_SECRET_KEY: strongpassword
+      BUCKET_NAME: uploads
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - minio
+      - redis
+    # Comando para iniciar o worker do Celery
+    command: celery -A main.celery_app worker --loglevel=info
+    restart: always
+
+  redis:
+    image: redis:6-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+volumes:
+  minio_data:
