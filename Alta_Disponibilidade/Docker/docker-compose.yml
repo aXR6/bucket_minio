@@ -80,3 +80,4 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=strongpassword
       - GF_AUTH_DISABLE_LOGIN_FORM=false
       - GF_AUTH_DISABLE_SIGNOUT_MENU=false
+      - GF_AUTH_DISABLE_BRUTE_FORCE_PROTECTION=true
