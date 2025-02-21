@@ -14,11 +14,8 @@ services:
     volumes:
       - ./minio/data:/data
       - ./minio/certs:/root/.minio/certs
+      - ./minio/entrypoint.sh:/entrypoint.sh
     entrypoint: ["/bin/sh", "-c", "/entrypoint.sh"]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 10s
-      retries: 5
 
   fastapi:
     build: ./api
