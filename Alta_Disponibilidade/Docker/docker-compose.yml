@@ -67,7 +67,7 @@ services:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
 
   grafana:
-    build: ./grafana  # Agora ele usa o Dockerfile customizado
+    build: ./grafana
     container_name: grafana
     restart: always
     ports:

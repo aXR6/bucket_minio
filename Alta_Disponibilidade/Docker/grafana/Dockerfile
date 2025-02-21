@@ -1,12 +1,14 @@
-# Usar a imagem oficial do Grafana
+# Usar a imagem oficial do Grafana (baseada no Alpine)
 FROM grafana/grafana:latest
 
-# Instalar SQLite dentro do container
+# Alternar para o usuário root para instalar pacotes
 USER root
-RUN apt-get update && apt-get install -y sqlite3 && rm -rf /var/lib/apt/lists/*
+
+# Atualizar e instalar SQLite no Alpine Linux
+RUN apk update && apk add sqlite
 
 # Voltar para o usuário padrão do Grafana
 USER grafana
 
-# Definir o diretório de trabalho
+# Definir diretório de trabalho
 WORKDIR /usr/share/grafana
