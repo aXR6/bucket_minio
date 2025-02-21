@@ -1,4 +1,4 @@
----
+version: "3.8"
 
 services:
   minio:
@@ -14,8 +14,9 @@ services:
       MINIO_PROMETHEUS_AUTH_TYPE: public
     volumes:
       - ./minio/data:/data
-      - ./minio/config.env:/etc/config.env
+      - ./minio/certs:/root/.minio/certs
     command: server --console-address ":9090" /data
+    entrypoint: ["/bin/sh", "-c", "/entrypoint.sh"]
 
   fastapi:
     build: ./api
@@ -27,13 +28,10 @@ services:
       - minio
       - redis
     environment:
-      - MINIO_URL=http://minio:9000
+      - MINIO_URL=https://minio:9000
       - MINIO_ACCESS_KEY=admin
       - MINIO_SECRET_KEY=strongpassword
       - BUCKET_NAME=uploads
-      - REDIS_HOST=redis
-    env_file:
-      - ./api/.env
 
   redis:
     image: redis:latest
@@ -42,7 +40,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - ./redis/data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf
 
   nginx:
     image: nginx
@@ -53,31 +51,18 @@ services:
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./minio/certs:/etc/nginx/certs
     depends_on:
       - fastapi
       - minio
 
-  prometheus:
-    image: prom/prometheus
-    container_name: prometheus
-    restart: always
-    ports:
-      - "9091:9090"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-
   grafana:
-    build: ./grafana
+    image: grafana/grafana
     container_name: grafana
     restart: always
     ports:
       - "3000:3000"
-    user: "472"
     volumes:
-      - ./grafana/data:/var/lib/grafana
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=strongpassword
-      - GF_AUTH_DISABLE_LOGIN_FORM=false
-      - GF_AUTH_DISABLE_SIGNOUT_MENU=false
-      - GF_AUTH_DISABLE_BRUTE_FORCE_PROTECTION=true
+      - ./grafana/grafana.ini:/etc/grafana/grafana.ini
+    depends_on:
+      - minio
