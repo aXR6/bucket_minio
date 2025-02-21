@@ -9,14 +9,16 @@ services:
       - "9000:9000"
       - "9090:9090"
     environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: strongpassword
-      MINIO_PROMETHEUS_AUTH_TYPE: public
+      - MINIO_ROOT_USER=admin
+      - MINIO_ROOT_PASSWORD=strongpassword
     volumes:
       - ./minio/data:/data
       - ./minio/certs:/root/.minio/certs
-    command: server --console-address ":9090" /data
     entrypoint: ["/bin/sh", "-c", "/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      retries: 5
 
   fastapi:
     build: ./api
@@ -46,15 +48,15 @@ services:
     image: nginx
     container_name: nginx
     restart: always
+    depends_on:
+      minio:
+        condition: service_healthy
     ports:
       - "80:80"
       - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
       - ./minio/certs:/etc/nginx/certs
-    depends_on:
-      - fastapi
-      - minio
 
   grafana:
     image: grafana/grafana

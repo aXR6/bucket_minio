@@ -1,9 +1,16 @@
 #!/bin/sh
 
-mkdir -p /root/.minio/certs
+CERTS_DIR="/etc/nginx/certs"
 
-openssl req -newkey rsa:2048 -nodes -keyout /root/.minio/certs/private.key \
-    -x509 -days 365 -out /root/.minio/certs/public.crt -subj "/CN=minio"
+mkdir -p $CERTS_DIR
 
-cp /root/.minio/certs/public.crt /etc/nginx/certs/
-cp /root/.minio/certs/private.key /etc/nginx/certs/
+if [ ! -f "$CERTS_DIR/public.crt" ] || [ ! -f "$CERTS_DIR/private.key" ]; then
+    echo "🔐 Gerando certificados SSL..."
+    openssl req -newkey rsa:2048 -nodes -keyout $CERTS_DIR/private.key \
+        -x509 -days 365 -out $CERTS_DIR/public.crt \
+        -subj "/CN=minio"
+
+    echo "✅ Certificados SSL gerados!"
+else
+    echo "🔐 Certificados já existem, pulando geração..."
+fi
