@@ -1,19 +1,31 @@
----
+version: '3.8'
 
 services:
   minio:
     image: minio/minio:latest
     container_name: minio
     volumes:
-      - minio_data:/data
+      - /home/bucket:/data
     environment:
       MINIO_ROOT_USER: admin
       MINIO_ROOT_PASSWORD: strongpassword
     ports:
-      - "9500:9000"   # Mapeia a porta padrão do MinIO (9000) para 9500 na máquina host
-      - "9501:9001"   # Porta para o console
+      - "9500:9000"   # Porta externa 9500 mapeada para a porta 9000 do container
+      - "9501:9001"   # Console do MinIO
     command: server /data --console-address ":9001"
     restart: always
+
+  minio-init:
+    image: minio/mc
+    container_name: minio-init
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "until mc alias set localminio http://minio:9000 admin strongpassword; do sleep 2; done;
+                  mc mb localminio/uploads || echo 'Bucket uploads já existe';
+                  mc policy set public localminio/uploads;
+                  sleep 2"
+    restart: "no"
 
   api:
     build: ./api
@@ -27,6 +39,7 @@ services:
     depends_on:
       - minio
       - redis
+      - minio-init
     ports:
       - "8000:8000"
     restart: always
@@ -43,7 +56,7 @@ services:
     depends_on:
       - minio
       - redis
-    # Comando para iniciar o worker do Celery
+      - minio-init
     command: celery -A main.celery_app worker --loglevel=info
     restart: always
 
@@ -53,6 +66,3 @@ services:
     ports:
       - "6379:6379"
     restart: always
-
-volumes:
-  minio_data:
